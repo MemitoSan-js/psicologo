@@ -50,8 +50,8 @@ const startServer = async () => {
   try {
     await connectDB();
 
-    app.listen(PORT, () => {
-      console.log(`Servidor backend corriendo en http://localhost:${PORT}`);
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Servidor backend corriendo en el puerto ${PORT}`);
     });
   } catch (error) {
     console.error("Error al iniciar el servidor:", error.message);
