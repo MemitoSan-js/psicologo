@@ -93,6 +93,7 @@ const DEFAULT_PSICOLOGOS = [
     colorEtiqueta: "#F2C230",
     imagen: "",
     imagenNombre: "",
+    mostrarEnPantalla: true,
   },
   {
     id: 2,
@@ -109,6 +110,7 @@ const DEFAULT_PSICOLOGOS = [
     colorEtiqueta: "#183B4A",
     imagen: "",
     imagenNombre: "",
+    mostrarEnPantalla: true,
   },
 ];
 
@@ -145,6 +147,7 @@ const FORM_INICIAL = {
   colorEtiqueta: COLOR_DEFAULT,
   imagen: "",
   imagenNombre: "",
+  mostrarEnPantalla: true,
 };
 
 const limpiarEspacios = (texto) => String(texto || "").replace(/\s+/g, " ");
@@ -237,6 +240,7 @@ const normalizarPsicologo = (psicologo, index = 0) => ({
     : COLOR_DEFAULT,
   imagen: psicologo.imagen || "",
   imagenNombre: psicologo.imagenNombre || "",
+  mostrarEnPantalla: psicologo.mostrarEnPantalla !== false,
 });
 
 // eslint-disable-next-line no-unused-vars
@@ -1079,6 +1083,54 @@ const FormularioPsicologo = ({
         </div>
 
         <CampoFechaHora form={form} cambiar={cambiar} errores={errores} />
+
+        <div className="rounded-2xl border border-[#D9D1B5] bg-[#F8F7F2] p-3">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-sm font-extrabold text-[#183B4A]">
+                Pantalla de pacientes
+              </p>
+              <p className="mt-0.5 text-xs font-medium leading-4 text-[#183B4A]/60">
+                Actívalo para mostrar al psicólogo únicamente en la fecha seleccionada.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              role="switch"
+              aria-checked={form.mostrarEnPantalla}
+              onClick={() =>
+                cambiar("mostrarEnPantalla", !form.mostrarEnPantalla)
+              }
+              className={`relative h-8 w-14 shrink-0 rounded-full transition ${
+                form.mostrarEnPantalla ? "bg-[#16803A]" : "bg-[#A7AFB3]"
+              }`}
+              title={
+                form.mostrarEnPantalla
+                  ? "Se mostrará en la pantalla"
+                  : "No se mostrará en la pantalla"
+              }
+            >
+              <span
+                className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow transition-all ${
+                  form.mostrarEnPantalla ? "left-7" : "left-1"
+                }`}
+              />
+            </button>
+          </div>
+
+          <div
+            className={`mt-3 rounded-xl px-3 py-2 text-xs font-bold ${
+              form.mostrarEnPantalla
+                ? "bg-[#E9F8EF] text-[#16803A]"
+                : "bg-[#E9EEF0] text-[#183B4A]/65"
+            }`}
+          >
+            {form.mostrarEnPantalla
+              ? "Visible en la pantalla durante la fecha asignada."
+              : "Guardado en el sistema, pero oculto para los pacientes."}
+          </div>
+        </div>
       </div>
 
       <div
@@ -1136,6 +1188,7 @@ export default function Psicologo() {
   const [erroresEditar, setErroresEditar] = useState({});
   const [notificacion, setNotificacion] = useState(null);
   const [guardando, setGuardando] = useState(false);
+  const [actualizandoPantallaId, setActualizandoPantallaId] = useState(null);
   const [modalEliminar, setModalEliminar] = useState({
     abierto: false,
     id: null,
@@ -1377,6 +1430,7 @@ export default function Psicologo() {
     colorEtiqueta: form.colorEtiqueta || COLOR_DEFAULT,
     imagen: form.imagen || "",
     imagenNombre: form.imagenNombre || "",
+    mostrarEnPantalla: form.mostrarEnPantalla !== false,
   });
 
   const agregarPsicologo = async (e) => {
@@ -1440,6 +1494,7 @@ export default function Psicologo() {
       colorEtiqueta: psicologo.colorEtiqueta || COLOR_DEFAULT,
       imagen: psicologo.imagen || "",
       imagenNombre: psicologo.imagenNombre || "",
+      mostrarEnPantalla: psicologo.mostrarEnPantalla !== false,
     });
   };
 
@@ -1537,6 +1592,60 @@ export default function Psicologo() {
         "No se pudo eliminar",
         error.message || "Revisa la conexión con el backend."
       );
+    }
+  };
+
+  const cambiarVisibilidadPantalla = async (psicologo, mostrar) => {
+    const id = obtenerIdPsicologo(psicologo);
+
+    if (!id) {
+      mostrarNotificacion(
+        "error",
+        "No se pudo actualizar",
+        "El psicólogo no tiene un identificador válido."
+      );
+      return;
+    }
+
+    const estadoNoVisible =
+      psicologo.estado === "Fuera de turno" ||
+      psicologo.estado === "No disponible";
+
+    const cambios = mostrar
+      ? {
+          fecha: getFechaHoy(),
+          mostrarEnPantalla: true,
+          ...(estadoNoVisible
+            ? {
+                estado: "Disponible",
+                estadoConsultorio: "Disponible",
+              }
+            : {}),
+        }
+      : {
+          mostrarEnPantalla: false,
+        };
+
+    try {
+      setActualizandoPantallaId(id);
+      await actualizarPsicologo(id, cambios);
+      await cargarPsicologos();
+
+      mostrarNotificacion(
+        "success",
+        mostrar ? "Programado para hoy" : "Oculto de la pantalla",
+        mostrar
+          ? `${psicologo.nombre} aparecerá hoy en la pantalla de pacientes.`
+          : `${psicologo.nombre} seguirá registrado, pero ya no aparecerá en la pantalla.`
+      );
+    } catch (error) {
+      mostrarNotificacion(
+        "error",
+        "No se pudo actualizar",
+        error.message || "Revisa la conexión con el backend."
+      );
+    } finally {
+      setActualizandoPantallaId(null);
     }
   };
 
@@ -1730,6 +1839,67 @@ export default function Psicologo() {
                             </svg>
                           </button>
                         </div>
+
+                        {(() => {
+                          const visibleHoy =
+                            psicologo.mostrarEnPantalla !== false &&
+                            psicologo.fecha === getFechaHoy();
+                          const actualizando = idsIguales(
+                            actualizandoPantallaId,
+                            obtenerIdPsicologo(psicologo)
+                          );
+
+                          return (
+                            <div
+                              className={`mt-4 flex items-center justify-between gap-3 rounded-xl border p-3 ${
+                                visibleHoy
+                                  ? "border-[#16803A]/25 bg-[#E9F8EF]"
+                                  : "border-[#D9D1B5] bg-[#F8F7F2]"
+                              }`}
+                            >
+                              <div className="min-w-0">
+                                <p
+                                  className={`text-xs font-extrabold ${
+                                    visibleHoy
+                                      ? "text-[#16803A]"
+                                      : "text-[#183B4A]"
+                                  }`}
+                                >
+                                  {visibleHoy
+                                    ? "Programado para hoy"
+                                    : "No aparece hoy en pantalla"}
+                                </p>
+                                <p className="mt-0.5 text-[11px] font-medium leading-4 text-[#183B4A]/60">
+                                  {visibleHoy
+                                    ? "Los pacientes pueden verlo en la pantalla."
+                                    : "El registro permanece guardado en el sistema."}
+                                </p>
+                              </div>
+
+                              <button
+                                type="button"
+                                disabled={actualizando}
+                                onClick={() =>
+                                  cambiarVisibilidadPantalla(
+                                    psicologo,
+                                    !visibleHoy
+                                  )
+                                }
+                                className={`shrink-0 rounded-xl px-3 py-2 text-xs font-extrabold transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-60 ${
+                                  visibleHoy
+                                    ? "border border-[#C62828]/25 bg-[#FCE7E7] text-[#C62828]"
+                                    : "bg-[#F2C230] text-[#183B4A]"
+                                }`}
+                              >
+                                {actualizando
+                                  ? "Actualizando..."
+                                  : visibleHoy
+                                  ? "Ocultar"
+                                  : "Mostrar hoy"}
+                              </button>
+                            </div>
+                          );
+                        })()}
 
                         <div className="mt-4 rounded-xl border border-[#D9D1B5]/70 bg-[#F8F7F2] p-3">
                           <div className="grid grid-cols-2 gap-3">

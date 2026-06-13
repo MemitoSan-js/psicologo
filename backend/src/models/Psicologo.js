@@ -31,10 +31,24 @@ const psicologoSchema = new mongoose.Schema(
       maxlength: [15, "El consultorio no puede tener más de 15 caracteres"],
     },
 
+    // Fecha en la que debe aparecer en la pantalla de pacientes.
+    // Formato esperado: YYYY-MM-DD.
     fecha: {
       type: String,
       default: "",
       trim: true,
+      match: [
+        /^$|^\d{4}-\d{2}-\d{2}$/,
+        "La fecha debe tener el formato YYYY-MM-DD",
+      ],
+      index: true,
+    },
+
+    // Permite ocultarlo sin eliminar el registro de MongoDB.
+    mostrarEnPantalla: {
+      type: Boolean,
+      default: true,
+      index: true,
     },
 
     horaInicio: {
@@ -106,6 +120,8 @@ const psicologoSchema = new mongoose.Schema(
     },
   }
 );
+
+psicologoSchema.index({ fecha: 1, mostrarEnPantalla: 1 });
 
 const Psicologo = mongoose.model("Psicologo", psicologoSchema);
 

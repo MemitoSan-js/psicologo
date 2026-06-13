@@ -119,6 +119,7 @@ const normalizarPsicologo = (psicologo) => ({
     : COLOR_DEFAULT,
   imagen: psicologo.imagen || "",
   imagenNombre: psicologo.imagenNombre || "",
+  mostrarEnPantalla: psicologo.mostrarEnPantalla !== false,
 });
 
 // eslint-disable-next-line no-unused-vars
@@ -138,6 +139,23 @@ const obtenerPsicologosGuardados = () => {
   } catch {
     return DEFAULT_PSICOLOGOS.map(normalizarPsicologo);
   }
+};
+
+const getFechaHoy = () => {
+  const partes = new Intl.DateTimeFormat("es-MX", {
+    timeZone: "America/Mexico_City",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+
+  const valores = {};
+
+  partes.forEach(({ type, value }) => {
+    valores[type] = value;
+  });
+
+  return `${valores.year}-${valores.month}-${valores.day}`;
 };
 
 const formatearHoraActual = (fecha) => {
@@ -382,11 +400,11 @@ const TarjetaPsicologo = ({ psicologo, index }) => {
           </div>
 
           <div>
-            <p className="text-[16px] font-semibold text-[#183B4A]/60">
+            <p className="text-[18px] font-bold text-[#183B4A]/65">
               Especialidad
             </p>
 
-            <p className="mt-1 line-clamp-2 text-[15px] font-semibold leading-5 text-[#183B4A]">
+            <p className="mt-2 line-clamp-3 text-[clamp(19px,1.3vw,25px)] font-bold leading-[1.35] text-[#183B4A]">
               {psicologo.especialidad || "Especialidad por definir."}
             </p>
           </div>
@@ -414,10 +432,14 @@ export default function Pantalla() {
     const actualizarDatos = async () => {
       try {
         const data = await obtenerPsicologos();
-        setPsicologos(Array.isArray(data) ? data : []);
+        setPsicologos(
+          Array.isArray(data) ? data.map(normalizarPsicologo) : []
+        );
       } catch (error) {
         const cache = obtenerPsicologosCache();
-        setPsicologos(cache);
+        setPsicologos(
+          Array.isArray(cache) ? cache.map(normalizarPsicologo) : []
+        );
         console.error("Error al cargar psicólogos desde el backend:", error);
       }
     };
@@ -437,7 +459,13 @@ export default function Pantalla() {
   }, []);
 
   const psicologosVisibles = useMemo(() => {
-    const activos = psicologos.filter((psicologo) => {
+    const hoy = getFechaHoy();
+
+    return psicologos.filter((psicologo) => {
+      const programadoHoy =
+        psicologo.mostrarEnPantalla !== false &&
+        psicologo.fecha === hoy;
+
       const estadoValido =
         psicologo.estado !== "No disponible" &&
         psicologo.estado !== "Fuera de turno";
@@ -445,11 +473,16 @@ export default function Pantalla() {
       const consultorioValido =
         psicologo.estadoConsultorio !== "Fuera de servicio";
 
-      return estadoValido && consultorioValido;
+      return programadoHoy && estadoValido && consultorioValido;
     });
-
-    return activos.length > 0 ? activos : psicologos;
   }, [psicologos]);
+
+  const clasesGrid =
+    psicologosVisibles.length === 1
+      ? "mx-auto w-full max-w-[660px] grid-cols-1"
+      : psicologosVisibles.length === 2
+      ? "mx-auto w-full max-w-[1280px] grid-cols-2"
+      : "grid-cols-3";
 
   return (
     <main className="fixed inset-0 h-[100dvh] w-screen overflow-hidden bg-[#183B4A] text-[#183B4A]">
@@ -510,14 +543,46 @@ export default function Pantalla() {
           </div>
         </header>
 
-        <section className="mt-6 grid min-h-0 flex-1 grid-cols-3 gap-6">
-          {psicologosVisibles.slice(0, 3).map((psicologo, index) => (
-            <TarjetaPsicologo
-              key={psicologo.id}
-              psicologo={psicologo}
-              index={index}
-            />
-          ))}
+        <section
+          className={`mt-6 grid min-h-0 flex-1 gap-6 ${clasesGrid}`}
+        >
+          {psicologosVisibles.length > 0 ? (
+            psicologosVisibles.slice(0, 3).map((psicologo, index) => (
+              <TarjetaPsicologo
+                key={psicologo._id || psicologo.id}
+                psicologo={psicologo}
+                index={index}
+              />
+            ))
+          ) : (
+            <div className="col-span-full flex min-h-0 items-center justify-center">
+              <div className="max-w-[680px] rounded-[32px] border border-[#F2C230]/35 bg-[#102C38]/75 px-10 py-12 text-center shadow-[0_18px_45px_rgba(16,44,56,0.28)]">
+                <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-[#F2C230] text-[#183B4A]">
+                  <svg
+                    className="h-11 w-11"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    viewBox="0 0 24 24"
+                  >
+                    <rect x="3" y="5" width="18" height="16" rx="2" />
+                    <path d="M16 3v4" />
+                    <path d="M8 3v4" />
+                    <path d="M3 11h18" />
+                  </svg>
+                </div>
+
+                <h2 className="mt-6 text-[34px] font-black text-[#F8F7F2]">
+                  No hay psicólogos programados para hoy
+                </h2>
+
+                <p className="mt-3 text-[20px] font-semibold leading-7 text-[#D9D1B5]">
+                  Los registros permanecen guardados. Desde la sección
+                  Psicólogos puedes seleccionar “Mostrar hoy”.
+                </p>
+              </div>
+            </div>
+          )}
         </section>
 
         <footer className="mx-auto mt-5 flex shrink-0 max-w-[760px] items-center justify-center gap-4 rounded-full border border-[#F2C230]/35 bg-[#102C38]/75 px-8 py-3 text-center shadow-[0_12px_30px_rgba(16,44,56,0.25)]">
