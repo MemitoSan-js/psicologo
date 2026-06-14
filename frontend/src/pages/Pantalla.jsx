@@ -1,6 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import logoCasaDomenica from "../img/casa_domenica.svg";
-import { obtenerPsicologos, obtenerPsicologosCache } from "../services/psicologosApi";
+import {
+  obtenerPsicologos,
+  obtenerPsicologosCache,
+} from "../services/psicologosApi";
 
 const STORAGE_KEY = "psicologos_app_v1";
 
@@ -319,7 +328,6 @@ const TarjetaPsicologo = ({ psicologo, index }) => {
         </div>
       </div>
 
-      {/* ESTATUS GRANDE PARA PACIENTES */}
       <div
         className={`mx-auto mt-4 flex w-full max-w-[360px] items-center justify-center gap-4 rounded-[24px] border-4 px-5 py-4 shadow-[0_12px_28px_rgba(16,44,56,0.16)] ${estado.badge}`}
         style={{ borderColor: estado.bordeStatus }}
@@ -421,6 +429,99 @@ const TarjetaPsicologo = ({ psicologo, index }) => {
 export default function Pantalla() {
   const [psicologos, setPsicologos] = useState([]);
   const [fechaActual, setFechaActual] = useState(new Date());
+  const [mostrarActivacion, setMostrarActivacion] = useState(true);
+  const [estadoWakeLock, setEstadoWakeLock] = useState("pendiente");
+  const [mensajeWakeLock, setMensajeWakeLock] = useState(
+    "Activa la protección para mantener esta pantalla encendida."
+  );
+
+  const wakeLockRef = useRef(null);
+  const proteccionSolicitadaRef = useRef(false);
+
+  const solicitarWakeLock = useCallback(async () => {
+    if (!("wakeLock" in navigator)) {
+      setEstadoWakeLock("no-compatible");
+      setMensajeWakeLock(
+        "Este navegador no admite la función para mantener la pantalla encendida."
+      );
+      return false;
+    }
+
+    if (document.visibilityState !== "visible") {
+      return false;
+    }
+
+    try {
+      if (wakeLockRef.current && wakeLockRef.current.released === false) {
+        setEstadoWakeLock("activo");
+        setMensajeWakeLock("Pantalla protegida contra suspensión.");
+        return true;
+      }
+
+      const wakeLock = await navigator.wakeLock.request("screen");
+      wakeLockRef.current = wakeLock;
+
+      setEstadoWakeLock("activo");
+      setMensajeWakeLock("Pantalla protegida contra suspensión.");
+
+      wakeLock.addEventListener(
+        "release",
+        () => {
+          if (wakeLockRef.current === wakeLock) {
+            wakeLockRef.current = null;
+          }
+
+          if (document.visibilityState === "visible") {
+            setEstadoWakeLock("inactivo");
+            setMensajeWakeLock(
+              "La protección se desactivó. Presiona Reactivar protección."
+            );
+          }
+        },
+        { once: true }
+      );
+
+      return true;
+    } catch (error) {
+      console.error("No se pudo activar Screen Wake Lock:", error);
+
+      setEstadoWakeLock("error");
+      setMensajeWakeLock(
+        "El navegador bloqueó la protección. Presiona el botón para intentarlo nuevamente."
+      );
+
+      return false;
+    }
+  }, []);
+
+  const activarModoPantalla = useCallback(async () => {
+    proteccionSolicitadaRef.current = true;
+    await solicitarWakeLock();
+
+    try {
+      if (
+        document.fullscreenEnabled &&
+        !document.fullscreenElement &&
+        typeof document.documentElement.requestFullscreen === "function"
+      ) {
+        await document.documentElement.requestFullscreen();
+      }
+    } catch (error) {
+      console.warn("No se pudo abrir la pantalla completa:", error);
+    }
+
+    setMostrarActivacion(false);
+  }, [solicitarWakeLock]);
+
+  const reactivarWakeLock = useCallback(async () => {
+    proteccionSolicitadaRef.current = true;
+    await solicitarWakeLock();
+  }, [solicitarWakeLock]);
+
+  const cerrarAvisoWakeLock = () => {
+    proteccionSolicitadaRef.current = false;
+    setEstadoWakeLock("omitido");
+  };
 
   useEffect(() => {
     const htmlOverflow = document.documentElement.style.overflow;
@@ -458,13 +559,51 @@ export default function Pantalla() {
     };
   }, []);
 
+  useEffect(() => {
+    const reactivarProteccion = () => {
+      if (
+        proteccionSolicitadaRef.current &&
+        document.visibilityState === "visible"
+      ) {
+        solicitarWakeLock();
+      }
+    };
+
+    document.addEventListener("visibilitychange", reactivarProteccion);
+    window.addEventListener("focus", reactivarProteccion);
+    window.addEventListener("pageshow", reactivarProteccion);
+
+    const intervaloWakeLock = setInterval(() => {
+      if (
+        proteccionSolicitadaRef.current &&
+        document.visibilityState === "visible" &&
+        (!wakeLockRef.current || wakeLockRef.current.released)
+      ) {
+        solicitarWakeLock();
+      }
+    }, 30000);
+
+    return () => {
+      document.removeEventListener("visibilitychange", reactivarProteccion);
+      window.removeEventListener("focus", reactivarProteccion);
+      window.removeEventListener("pageshow", reactivarProteccion);
+      clearInterval(intervaloWakeLock);
+
+      const wakeLockActual = wakeLockRef.current;
+      wakeLockRef.current = null;
+
+      if (wakeLockActual && wakeLockActual.released === false) {
+        wakeLockActual.release().catch(() => {});
+      }
+    };
+  }, [solicitarWakeLock]);
+
   const psicologosVisibles = useMemo(() => {
     const hoy = getFechaHoy();
 
     return psicologos.filter((psicologo) => {
       const programadoHoy =
-        psicologo.mostrarEnPantalla !== false &&
-        psicologo.fecha === hoy;
+        psicologo.mostrarEnPantalla !== false && psicologo.fecha === hoy;
 
       const estadoValido =
         psicologo.estado !== "No disponible" &&
@@ -484,9 +623,91 @@ export default function Pantalla() {
       ? "mx-auto w-full max-w-[1280px] grid-cols-2"
       : "grid-cols-3";
 
+  const mostrarAvisoWakeLock =
+    !mostrarActivacion &&
+    // eslint-disable-next-line react-hooks/refs
+    proteccionSolicitadaRef.current &&
+    estadoWakeLock !== "activo" &&
+    estadoWakeLock !== "omitido";
+
   return (
     <main className="fixed inset-0 h-[100dvh] w-screen overflow-hidden bg-[#183B4A] text-[#183B4A]">
-      {/* Fondo decorativo */}
+      {mostrarActivacion && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#102C38]/95 px-6 backdrop-blur-sm">
+          <div className="w-full max-w-[620px] rounded-[32px] border border-[#F2C230]/40 bg-[#183B4A] p-8 text-center shadow-[0_24px_70px_rgba(0,0,0,0.38)]">
+            <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-[#F2C230] text-[#183B4A]">
+              <svg
+                className="h-11 w-11"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.3"
+                viewBox="0 0 24 24"
+              >
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+            </div>
+
+            <h1 className="mt-6 text-[34px] font-black leading-tight text-[#F8F7F2]">
+              Mantener pantalla encendida
+            </h1>
+
+            <p className="mx-auto mt-3 max-w-[500px] text-[19px] font-semibold leading-7 text-[#D9D1B5]">
+              Presiona una vez para activar la protección contra suspensión y
+              abrir la vista en pantalla completa.
+            </p>
+
+            <button
+              type="button"
+              onClick={activarModoPantalla}
+              className="mt-7 h-16 w-full rounded-2xl bg-[#F2C230] px-5 text-[21px] font-black text-[#183B4A] shadow-[0_12px_28px_rgba(242,194,48,0.28)] transition active:scale-[0.98]"
+            >
+              Activar pantalla
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMostrarActivacion(false)}
+              className="mt-3 h-12 w-full rounded-2xl border border-[#D9D1B5]/35 bg-transparent px-5 text-[16px] font-bold text-[#D9D1B5] transition active:scale-[0.98]"
+            >
+              Continuar sin protección
+            </button>
+          </div>
+        </div>
+      )}
+
+      {estadoWakeLock === "activo" && (
+        <div className="fixed bottom-4 right-4 z-50 rounded-full border border-white/15 bg-[#16803A]/90 px-4 py-2 text-sm font-bold text-white shadow-lg">
+          Pantalla protegida
+        </div>
+      )}
+
+      {mostrarAvisoWakeLock && (
+        <div className="fixed bottom-4 right-4 z-50 flex max-w-[470px] items-center gap-3 rounded-2xl border border-[#F2C230]/45 bg-[#102C38]/95 p-3 text-[#F8F7F2] shadow-[0_16px_36px_rgba(0,0,0,0.28)]">
+          <p className="min-w-0 flex-1 text-sm font-semibold leading-5">
+            {mensajeWakeLock}
+          </p>
+
+          {estadoWakeLock === "no-compatible" ? (
+            <button
+              type="button"
+              onClick={cerrarAvisoWakeLock}
+              className="shrink-0 rounded-xl border border-[#D9D1B5]/40 px-4 py-2 text-sm font-black text-[#F8F7F2]"
+            >
+              Cerrar
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={reactivarWakeLock}
+              className="shrink-0 rounded-xl bg-[#F2C230] px-4 py-2 text-sm font-black text-[#183B4A]"
+            >
+              Reactivar
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="pointer-events-none absolute left-0 top-0 h-4 w-full bg-[#F2C230]" />
       <div className="pointer-events-none absolute bottom-[-120px] left-[-120px] h-[360px] w-[360px] rounded-full border-[42px] border-[#F2C230]/35" />
       <div className="pointer-events-none absolute right-[-80px] top-[120px] h-[420px] w-[220px] rounded-full border-[38px] border-[#F2C230]/30" />
@@ -494,7 +715,6 @@ export default function Pantalla() {
 
       <section className="relative z-10 flex h-full min-h-0 flex-col px-8 py-5">
         <header className="grid shrink-0 grid-cols-[1fr_1.5fr_1fr] items-start gap-6">
-          {/* Logo Casa Domenica */}
           <div className="flex justify-start">
             <div className="flex min-h-[92px] min-w-[230px] items-center justify-center rounded-[24px] border border-[#D9D1B5] bg-[#F8F7F2] px-7 py-4 shadow-[0_12px_30px_rgba(16,44,56,0.22)]">
               <img
@@ -543,9 +763,7 @@ export default function Pantalla() {
           </div>
         </header>
 
-        <section
-          className={`mt-6 grid min-h-0 flex-1 gap-6 ${clasesGrid}`}
-        >
+        <section className={`mt-6 grid min-h-0 flex-1 gap-6 ${clasesGrid}`}>
           {psicologosVisibles.length > 0 ? (
             psicologosVisibles.slice(0, 3).map((psicologo, index) => (
               <TarjetaPsicologo
